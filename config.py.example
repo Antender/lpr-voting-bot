@@ -1,0 +1,7 @@
+TELEGRAM_TOKEN = ""
+CHAT_ID = -123
+ADMIN = "Siergiej"
+BOT_NAME = "lpr_voting_test_bot"
+ADMIN_CAN_VOTE = False
+DOMAIN = "https://antender.pythonanywhere.com"
+ACCESS_TOKEN = ""
