@@ -2,7 +2,7 @@ import string
 import json
 from bottle import default_app, static_file, get, post, request, abort
 from config import ACCESS_TOKEN, CHAT_ID, ADMIN, BOT_NAME, ADMIN_CAN_VOTE
-from membership_cache import addVoterToCache, removeVoterFromCache, clearCache, loadIDs
+from membership_cache import addVoterToCache, clearCache, loadIDs
 from telegram import SECRET, apiCall
 
 with open("help.md") as f:
@@ -230,7 +230,7 @@ def processAdminCommand(text):
         return
     if text == "/clearuserids":
         voters.clear()
-        clearIDs()
+        clearCache()
     if text == "/status":
         sendToGroupChat(
             """
