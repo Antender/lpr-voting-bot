@@ -1,13 +1,12 @@
 import string
 import json
-from bottle import default_app, static_file, get, post, request, abort
-from config import ACCESS_TOKEN, CHAT_ID, ADMIN, BOT_NAME, ADMIN_CAN_VOTE
-from membership_cache import addVoterToCache, clearCache, loadIDs
+from bottle import default_app, post, request, abort
+from config import ACCESS_TOKEN, CHAT_ID, ADMIN, BOT_NAME, ADMIN_CAN_VOTE, PRIORITY_VOTING_SCALE
+from membership_cache import addVoterToCache, removeVoterFromCache, clearCache, loadIDs
 from telegram import SECRET, apiCall
 
 with open("help.md") as f:
     HELP = f.read()
-
 
 def addVoter(user):
     global voters
@@ -60,15 +59,18 @@ def setWinnerCount(count):
     try:
         count = int(count)
     except:
-        sendToGroupChat("Кол-во должно быть числом от 1 до кол-ва кандидатов - 1")
+        sendToGroupChat("Кол-во должно быть числом от 1 до кол-ва кандидатов")
         return
     if (count >= 1) and (count <= len(candidates)):
         winner_count = count
         sendToGroupChat(f"Число победителей: {winner_count}")
         return
-    sendToGroupChat("Кол-во должно быть числом от 1 до кол-ва кандидатов - 1")
+    sendToGroupChat("Кол-во должно быть числом от 1 до кол-ва кандидатов")
     return
 
+def setPriority(value):
+    global priorityVoting
+    priorityVoting = value
 
 def printStats():
     all_voters = len(voters)
@@ -93,8 +95,56 @@ _Закончили голосовать_: {}/{}
         )
     )
 
+def printWinnersPriority():
+    winners = []
+    for candidate in candidates:
+        winners.append({"votes": 0, "points": 0, "candidate": candidate})
+    fully_voted = 0
+    partially_voted = 0
+    for vote_key in votes:
+        if vote_key in confirmed:
+            vote_list = votes[vote_key]
+            fully_voted += 1
+            vote_index = 0
+            for vote in vote_list:
+                winners[vote]["votes"] += 1
+                winners[vote]["points"] += PRIORITY_VOTING_SCALE[winner_count - vote_index - 1]
+                vote_index += 1
+        else:
+            partially_voted += 1
+    winners.sort(key=lambda item: item["points"], reverse=True)
+    if winners[winner_count - 1]["points"] == winners[winner_count]["points"]:
+        tied_start = 0
+        tied_target = winners[winner_count]["points"]
+        while winners[tied_start]["points"] != tied_target:
+            tied_start += 1
+        tied_end = tied_start
+        while tied_end < len(winners) and winners[tied_end]["points"] == tied_target:
+            tied_end += 1
+        tied = winners[tied_start:tied_end]
+        losers = winners[tied_end : len(winners)]
+        winners = winners[0:tied_start]
+    else:
+        tied = None
+        losers = winners[winner_count : len(winners)]
+        winners = winners[0:winner_count]
+    text = f"_Проголосовали_: {fully_voted}\n_Недоголосовали (не учитываются)_: {partially_voted}\n*Победители*:\n"
+    candidate_index = 1
+    for winner in winners:
+        text += f"{candidate_index}. {winner['candidate']}: {winner['points']} баллов, {winner['votes']} голосов\n"
+        candidate_index += 1
+    if tied is not None:
+        text += "*Одинаково голосов*:\n"
+        for tie in tied:
+            text += f"{candidate_index}. {tie['candidate']}: {tie['points']} баллов, {tie['votes']} голосов\n"
+            candidate_index += 1
+    text += "_Остальные_:\n"
+    for loser in losers:
+        text += f"{candidate_index}. {loser['candidate']}: {loser['points']} баллов, {loser['votes']} голосов\n"
+        candidate_index += 1
+    return text
 
-def printWinners():
+def printWinnersSimple():
     winners = []
     for candidate in candidates:
         winners.append({"votes": 0, "candidate": candidate})
@@ -140,8 +190,14 @@ def printWinners():
     for loser in losers:
         text += f"{candidate_index}. {loser['candidate']}: {loser['votes']} голосов\n"
         candidate_index += 1
-    sendToGroupChat(text)
+    return text
 
+def printWinners():
+    if priorityVoting:
+        sendToGroupChat(printWinnersPriority())
+    else:
+        sendToGroupChat(printWinnersSimple())
+    return
 
 def processAdminCommand(text):
     global voting_status
@@ -176,6 +232,18 @@ def processAdminCommand(text):
             sendToGroupChat("Голосование уже было начато")
             return
         setGoal(text.removeprefix("/goal").removeprefix(f"@{BOT_NAME}").strip(" "))
+        return
+    if text.startswith("/setpriority"):
+        if voting_status != "не начато":
+            sendToGroupChat("Голосование уже было начато")
+            return
+        setPriority(True)
+        return
+    if text.startswith("/setsimple"):
+        if voting_status != "не начато":
+            sendToGroupChat("Голосование уже было начато")
+            return
+        setPriority(False)
         return
     if text.startswith("/startvoting"):
         if voting_status == "приостановлено":
@@ -237,6 +305,7 @@ def processAdminCommand(text):
 _Голосование_: {}
 _Кол-во возможных победителей_: {}
 _Голосующих_: {}
+_Приоритетное_: {}
 _Цель голосования_:
 {}
 _Кандидаты_:
@@ -245,6 +314,7 @@ _Кандидаты_:
                 voting_status,
                 "*не задано*" if winner_count is None else winner_count,
                 len(voters),
+                "да" if priorityVoting is True else "нет",
                 "*не задана*" if goal is None else goal,
                 "\n".join(candidates),
             )
@@ -296,7 +366,10 @@ def buildPreviousText(user_id, candidate_index):
     elif len(votes[user_id]) == winner_count:
         previous = f"{previous}*Подтвердите свои голоса*"
     else:
-        previous = f"{previous}_Голосуем за кандидата_ *{candidate_index}* _из_ *{winner_count}*_:_"
+        if priorityVoting:
+            previous = f"{previous}_Голосуем за кандидата_ *{candidate_index}* _из_ *{winner_count}*_:_"
+        else:
+            previous = f"{previous}_Голосуем за кандидата_ *{candidate_index}* _из_ *{winner_count}* ({PRIORITY_VOTING_SCALE[winner_count - candidate_index]} баллов)_:_"
     return previous
 
 
@@ -378,12 +451,6 @@ def processMessage(message):
             apiCall("leaveChat", {"chat_id": chat["id"]})
             return
         if "migrate_to_chat_id" in message:
-            # CHAT_ID = message['migrate_to_chat_id']
-            # config = configparser.ConfigParser()
-            # config.read('config.ini')
-            # config['settings']['chat_id'] = str(CHAT_ID)
-            # with open('config.ini', 'w') as configfile:
-            #    config.write(configfile)
             return
         if "new_chat_members" in message:
             for user in message["new_chat_members"]:
@@ -394,10 +461,7 @@ def processMessage(message):
                 voters.remove(message["left_chat_member"]["id"])
             except KeyError:
                 pass
-            with open("saved_ids", "a") as f:
-                for voter in voters:
-                    print(f"remove {voter}", file=f)
-                f.flush()
+            removeVoterFromCache(CHAT_ID, user)
             return
         if "from" in message:
             sent_by = message["from"]
@@ -512,15 +576,9 @@ def update():
     else:
         abort(401, "Access denied.")
 
-
-@get("/source-code")
-def sourceCode():
-    return static_file("main.py", root="./")
-
-
 @post(f"/clear/{ACCESS_TOKEN}")
 def clear():
-    global voting_status, winner_count, candidates, votes, choosers, goal, confirmed
+    global voting_status, winner_count, candidates, votes, choosers, goal, confirmed, priorityVoting
     voting_status = "не начато"
     winner_count = None
     candidates = []
@@ -528,6 +586,7 @@ def clear():
     choosers = {}
     goal = None
     confirmed = set()
+    priorityVoting = False
     return "OK"
 
 
