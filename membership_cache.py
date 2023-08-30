@@ -11,11 +11,11 @@ db.execute(
 )
 
 def addVoterToCache(user):
-    db.execute("INSERT INTO membership VALUES (?);", (user))
+    db.execute("INSERT INTO membership VALUES (?);", (user,))
 
 
 def removeVoterFromCache(user):
-    db.execute("DELETE FROM membership WHERE user = ?;", (user))
+    db.execute("DELETE FROM membership WHERE user = ?;", (user,))
 
 
 def clearCache():

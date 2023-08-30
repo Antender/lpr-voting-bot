@@ -461,7 +461,7 @@ def processMessage(message):
                 voters.remove(message["left_chat_member"]["id"])
             except KeyError:
                 pass
-            removeVoterFromCache(CHAT_ID, user)
+            removeVoterFromCache(CHAT_ID, message["left_chat_member"]["id"])
             return
         if "from" in message:
             sent_by = message["from"]
