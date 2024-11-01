@@ -9,7 +9,7 @@ import os
 import sys
 
 # add your project directory to the sys.path
-project_home = '/home/antender/voting_bot'
+project_home = '/home/conventbot/mysite'
 if project_home not in sys.path:
     sys.path = [project_home] + sys.path
 
